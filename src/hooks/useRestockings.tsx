@@ -197,15 +197,125 @@ export const useRestockings = () => {
   });
 
   const updateRestocking = useMutation({
+    // mutationFn: async ({
+    //   id,
+    //   suppliers,
+    //   restocking_items,
+    //   ...restockingData
+    // }: Partial<Restocking> & { id: string }) => {
+    //   console.log("Updating restocking:", id, restockingData);
+
+    //   try {
+    //     const { data: currentRestocking, error: fetchError } = await supabase
+    //       .from("restockings")
+    //       .select("status")
+    //       .eq("id", id)
+    //       .single();
+
+    //     if (fetchError) {
+    //       console.error("Error fetching current restocking:", fetchError);
+    //       throw new Error(
+    //         `Erreur lors de la récupération: ${fetchError.message}`
+    //       );
+    //     }
+
+    //     const oldStatus = currentRestocking.status;
+    //     const newStatus = restockingData.status;
+
+    //     if (oldStatus === "completed") {
+    //       throw new Error(
+    //         "Un réapprovisionnement terminé ne peut plus être modifié"
+    //       );
+    //     }
+
+    //     const { data, error } = await supabase
+    //       .from("restockings")
+    //       .update(restockingData)
+    //       .eq("id", id)
+    //       .select()
+    //       .single();
+
+    //     if (error) {
+    //       console.error("Error updating restocking:", error);
+    //       throw new Error(`Erreur lors de la mise à jour: ${error.message}`);
+    //     }
+
+    //     // Si on passe de pending à completed, mettre à jour les stocks
+    //     if (oldStatus === "pending" && newStatus === "completed") {
+    //       const { data: currentItems, error: itemsError } = await supabase
+    //         .from("restocking_items")
+    //         .select("product_id, quantity")
+    //         .eq("restocking_id", id);
+
+    //       if (itemsError) {
+    //         console.error("Error fetching restocking items:", itemsError);
+    //         throw new Error(
+    //           `Erreur lors de la récupération des articles: ${itemsError.message}`
+    //         );
+    //       }
+
+    //       if (currentItems) {
+    //         console.log("Validating restocking - adding quantities to stock");
+    //         for (const item of currentItems) {
+    //           try {
+    //             const { error: updateError } = await supabase.rpc(
+    //               "update_product_quantity",
+    //               {
+    //                 product_id: item.product_id,
+    //                 quantity_change: Number(item.quantity),
+    //               }
+    //             );
+
+    //             if (updateError) {
+    //               console.error(
+    //                 "Error updating product quantity:",
+    //                 updateError
+    //               );
+    //               throw new Error(
+    //                 `Erreur lors de la mise à jour du stock pour le produit ${item.product_id}: ${updateError.message}`
+    //               );
+    //             } else {
+    //               console.log(
+    //                 `Added ${item.quantity} to product ${item.product_id}`
+    //               );
+    //             }
+    //           } catch (error) {
+    //             console.error("Error in product quantity update:", error);
+    //             throw error;
+    //           }
+    //         }
+    //         toast.success(
+    //           "Réapprovisionnement validé ! Stock mis à jour avec succès !",
+    //           {
+    //             duration: 5000,
+    //           }
+    //         );
+    //       }
+    //     }
+
+    //     return data;
+    //   } catch (error) {
+    //     console.error("Update restocking error:", error);
+    //     throw error;
+    //   }
+    // },
     mutationFn: async ({
       id,
-      suppliers,
-      restocking_items,
-      ...restockingData
-    }: Partial<Restocking> & { id: string }) => {
-      console.log("Updating restocking:", id, restockingData);
+      restocking,
+      items,
+    }: {
+      id: string;
+      restocking: Partial<Restocking>;
+      items?: Array<{
+        product_id: string;
+        quantity: number;
+        unit_cost: number;
+      }>;
+    }) => {
+      console.log("Updating restocking:", id, restocking);
 
       try {
+        // 1. Validation du statut
         const { data: currentRestocking, error: fetchError } = await supabase
           .from("restockings")
           .select("status")
@@ -213,14 +323,13 @@ export const useRestockings = () => {
           .single();
 
         if (fetchError) {
-          console.error("Error fetching current restocking:", fetchError);
           throw new Error(
             `Erreur lors de la récupération: ${fetchError.message}`
           );
         }
 
         const oldStatus = currentRestocking.status;
-        const newStatus = restockingData.status;
+        const newStatus = restocking.status;
 
         if (oldStatus === "completed") {
           throw new Error(
@@ -228,19 +337,49 @@ export const useRestockings = () => {
           );
         }
 
+        // 2. Update du restocking seul
         const { data, error } = await supabase
           .from("restockings")
-          .update(restockingData)
+          .update(restocking) // on n'envoie QUE les vrais champs de la table ici
           .eq("id", id)
           .select()
           .single();
 
         if (error) {
-          console.error("Error updating restocking:", error);
           throw new Error(`Erreur lors de la mise à jour: ${error.message}`);
         }
 
-        // Si on passe de pending à completed, mettre à jour les stocks
+        // 3. Update des items s’il y en a
+        if (items && items.length > 0) {
+          const { error: deleteError } = await supabase
+            .from("restocking_items")
+            .delete()
+            .eq("restocking_id", id);
+
+          if (deleteError) {
+            throw new Error(
+              `Erreur lors de la suppression des anciens articles: ${deleteError.message}`
+            );
+          }
+
+          const { error: insertError } = await supabase
+            .from("restocking_items")
+            .insert(
+              items.map((item) => ({
+                restocking_id: id,
+                ...item,
+                total_cost: item.quantity * item.unit_cost,
+              }))
+            );
+
+          if (insertError) {
+            throw new Error(
+              `Erreur lors de l'insertion des nouveaux articles: ${insertError.message}`
+            );
+          }
+        }
+
+        // 4. Update des stocks si changement de statut
         if (oldStatus === "pending" && newStatus === "completed") {
           const { data: currentItems, error: itemsError } = await supabase
             .from("restocking_items")
@@ -248,49 +387,28 @@ export const useRestockings = () => {
             .eq("restocking_id", id);
 
           if (itemsError) {
-            console.error("Error fetching restocking items:", itemsError);
             throw new Error(
               `Erreur lors de la récupération des articles: ${itemsError.message}`
             );
           }
 
-          if (currentItems) {
-            console.log("Validating restocking - adding quantities to stock");
-            for (const item of currentItems) {
-              try {
-                const { error: updateError } = await supabase.rpc(
-                  "update_product_quantity",
-                  {
-                    product_id: item.product_id,
-                    quantity_change: Number(item.quantity),
-                  }
-                );
-
-                if (updateError) {
-                  console.error(
-                    "Error updating product quantity:",
-                    updateError
-                  );
-                  throw new Error(
-                    `Erreur lors de la mise à jour du stock pour le produit ${item.product_id}: ${updateError.message}`
-                  );
-                } else {
-                  console.log(
-                    `Added ${item.quantity} to product ${item.product_id}`
-                  );
-                }
-              } catch (error) {
-                console.error("Error in product quantity update:", error);
-                throw error;
-              }
-            }
-            toast.success(
-              "Réapprovisionnement validé ! Stock mis à jour avec succès !",
+          for (const item of currentItems || []) {
+            const { error: updateError } = await supabase.rpc(
+              "update_product_quantity",
               {
-                duration: 5000,
+                product_id: item.product_id,
+                quantity_change: Number(item.quantity),
               }
             );
+
+            if (updateError) {
+              throw new Error(
+                `Erreur lors de la mise à jour du stock pour ${item.product_id}: ${updateError.message}`
+              );
+            }
           }
+
+          toast.success("Réapprovisionnement validé ! Stock mis à jour !");
         }
 
         return data;
