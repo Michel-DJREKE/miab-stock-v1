@@ -162,7 +162,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       toast.error('Erreur lors de la déconnexion');
     } finally {
       setLoading(false);
-    }
+    } 
   };
 
   const value = {
