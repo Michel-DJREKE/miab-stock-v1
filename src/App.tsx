@@ -25,6 +25,7 @@ import Alerts from '@/pages/Alerts';
 import History from '@/pages/History';
 import Auth from '@/pages/Auth';
 import NotFound from '@/pages/NotFound';
+import NewSale from './pages/NewSale';
 
 const queryClient = new QueryClient();
 
@@ -54,6 +55,11 @@ function App() {
                 <Route path="/sales" element={
                   <ProtectedRoute>
                     <Layout><Sales /></Layout>
+                  </ProtectedRoute>
+                } />
+                <Route path="/sales/new" element={
+                  <ProtectedRoute>
+                    <Layout><NewSale /></Layout>
                   </ProtectedRoute>
                 } />
                 
